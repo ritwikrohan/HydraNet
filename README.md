@@ -15,6 +15,14 @@ Implementation of a multi-task learning architecture that performs three critica
 | ![YOLOv8 Multi-task](https://i.imgflip.com/a49ao9.gif) | ![SSD Multi-task](https://i.imgflip.com/a49asb.gif) |
 | *YOLOv8 variant: Tighter bounding boxes, 72.1% mAP* | *SSD variant: Lower memory usage, 40.9% mAP* |
 
+### Architecture 
+
+<div align="center">
+<img src="architecture.png" width="800">
+</div>
+
+*Multi-task architecture with shared MobileNetV2 encoder and task-specific decoders. Orange: Pretrained seg+depth, Blue: Detection head training*
+
 ## Key Features
 
 - **Unified Architecture**: Single encoder for three perception tasks reducing computational redundancy
