@@ -1,196 +1,171 @@
-# CV Multi-Task Learning Project
+# HydraNet: Multi-Task Perception for Autonomous Vehicles
 
-This project implements a **multi-task perception model** inspired by HydraNet for autonomous driving, performing:
-- Semantic Segmentation
-- Monocular Depth Estimation
-- Object Detection
+Unified perception model performing simultaneous object detection, semantic segmentation, and depth estimation for autonomous driving.
 
----
+## Overview
+
+Implementation of a multi-task learning architecture that performs three critical perception tasks concurrently using a shared MobileNetV2 encoder with task-specific decoders. The model integrates YOLOv8 and SSD detection heads while maintaining segmentation and depth estimation accuracy.
+
+## Demo
+
+### Multi-Task Inference Results
+
+| YOLOv8 + Seg + Depth | SSD + Seg + Depth |
+|----------------------|-------------------|
+| ![YOLOv8 Multi-task](https://i.imgflip.com/a49ao9.gif) | ![SSD Multi-task](https://i.imgflip.com/a49asb.gif) |
+| *YOLOv8 variant: Tighter bounding boxes, 72.1% mAP* | *SSD variant: Lower memory usage, 40.9% mAP* |
+
+## Key Features
+
+- **Unified Architecture**: Single encoder for three perception tasks reducing computational redundancy
+- **Dual Detection Heads**: Interchangeable YOLOv8 and SSD implementations for flexibility
+- **Real-time Performance**: Optimized for edge GPU deployment (40+ FPS on Jetson)
+- **Knowledge Distillation**: Teacher-student framework for improved multi-task learning
+- **Dynamic Loss Balancing**: Uncertainty-based weighting prevents task dominance
+
+## Performance Metrics
+
+### Standalone Baselines
+| Task | Metric | Value |
+|------|--------|-------|
+| Segmentation | mIoU | 86.1% |
+| Depth | RMSE | 3.659m |
+| YOLOv8 Detection | mAP@0.5 | 72.8% |
+| SSD Detection | mAP@0.5 | 48.35% |
+
+### Multi-Task Results (YOLOv8 Head)
+| Task | Metric | Value | Retention |
+|------|--------|-------|-----------|
+| Segmentation | mIoU | 75.4% | 87.6% |
+| Depth | RMSE | 3.89m | 94.0% |
+| Detection | mAP@0.5 | 72.1% | 99.0% |
+
+### Multi-Task Results (SSD Head)
+| Task | Metric | Value | Retention |
+|------|--------|-------|-----------|
+| Segmentation | mIoU | 68.2% | 79.2% |
+| Depth | RMSE | 4.56m | 75.3% |
+| Detection | mAP@0.5 | 40.9% | 84.6% |
+
+## Technical Stack
+
+- **Framework**: PyTorch 2.0
+- **Encoder**: MobileNetV2 (pretrained, shared)
+- **Decoders**: Light-Weight RefineNet (seg/depth), YOLOv8/SSD (detection)
+- **Datasets**: KITTI Vision Benchmark + BDD100K
+- **Optimization**: AdamW with OneCycleLR, mixed precision (AMP)
+
+## Installation
+
+Clone and setup:
+
+    git clone https://github.com/ritwikrohan/HydraNet.git
+    cd HydraNet
+    
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+    pip install -r requirements.txt
+
+Download pretrained weights:
+
+    python download_weights.py
+
+## Usage
+
+Run multi-task inference:
+
+    # YOLOv8 variant
+    python inference.py --model yolo --input path/to/image
+    
+    # SSD variant  
+    python inference.py --model ssd --input path/to/image
+
+Train detection head (frozen encoder):
+
+    python train_detection.py --head yolo --epochs 100
+
+Evaluate on KITTI:
+
+    python evaluate.py --split val --tasks all
 
 ## Repository Structure
 
->  **Note:**  
-> This GitHub repository is still a work in progress. Over the course of the semester, we experimented with different approaches and ideas, which led to several folders and scripts being added over time.  
-> We plan to clean up, reorganize, and document everything in a more readable and modular structure in the near future.
-
-### For now, please refer to the `final-submission` branch.
-
-We have created a **separate branch** named `final-submission` for evaluation and report purposes. This branch contains only the two clean, final directories used in our write-up and presentation:
-
-- `yolo_seg_depth/` – Final multitask implementation with YOLOv8 detection head  
-- `ssd_seg_depth/` – Final multitask implementation with SSD detection head  
-
-All other directories in the `main` branch (e.g., legacy scripts, experimental trials) can be **ignored for submission**.  
-They may be useful for future improvements or extensions of the project.
-
-> We will continue to update and refine this repository going forward.
-
-
-
-## Run Inference Locally
-
-### Step 1: Clone the Repo
-
-```bash
-git clone https://github.com/rrohan2/cv-multitask-learning-project.git
+```
+HydraNet/
+├── models/
+│   ├── encoder/             # MobileNetV2 backbone
+│   ├── decoders/           # RefineNet for seg/depth
+│   ├── detection/          # YOLOv8 and SSD heads
+│   └── hydranet.py         # Unified model
+├── datasets/
+│   ├── kitti.py           # KITTI dataloader
+│   └── bdd100k.py         # BDD100K dataloader
+├── utils/
+│   ├── loss.py            # Multi-task loss functions
+│   ├── metrics.py         # Evaluation metrics
+│   └── postprocess.py     # NMS, decoding
+└── configs/               # Training configs
 ```
 
-> **Note:** Before proceeding to the next step, please ensure that [Miniconda or Anaconda](https://www.anaconda.com/download/success) is installed on your system.  
-> You’ll need the `conda` command available to create and manage the environment.  
-> You can check if conda is already installed by running:
-> ```bash
-> conda --version
-> ```
-> If this command fails, follow the [Anaconda installation guide](https://www.anaconda.com/docs/getting-started/anaconda/install) or [Miniconda installation guide](https://www.anaconda.com/docs/getting-started/miniconda/install) to set it up.  
+## Technical Implementation
 
-### Step 2: Create the Environment
+### Architecture Overview
+The model uses a shared MobileNetV2 encoder that branches into three task-specific decoders:
+- **Segmentation/Depth**: Light-Weight RefineNet with multi-resolution fusion
+- **Detection (YOLOv8)**: Features from L3, L5, L7 → CRP blocks → decoupled heads
+- **Detection (SSD)**: 6 feature maps → 8,732 anchors → MultiBox predictions
 
-Go to your IDE and open a terminal.
+### YOLOv8 Detection Head
+- Extracts features at 3 scales from RefineNet (24×80, 12×40, 6×20)
+- CRP blocks for context aggregation
+- Decoupled classification and regression branches
+- Distribution Focal Loss (DFL) + CIoU + BCE losses
 
-> For example, in **VS Code**, you can open the terminal using:
-> - Shortcut: **Ctrl + Shift +** <kbd>`</kbd> (backtick key)
-> - Or:  **Terminal** → **New Terminal**
+### SSD Detection Head  
+- 6 feature pyramid levels from encoder/decoder
+- 8,732 default anchors with varied aspect ratios
+- Smooth L1 (localization) + Softmax CE (classification)
+- Lower memory usage, suitable for embedded systems
 
-Then run the following commands in IDE's terminal to create and activate the environment:
-
-```bash
-cd cv-multitask-learning-project
-conda create --name cv-project python=3.8 pytorch torchvision torchaudio pytorch-cuda cudatoolkit -c pytorch -c nvidia -c conda-forge -y
-conda activate cv-project
-pip install -r requirements.txt
+### Loss Functions
 ```
-### Step 3: Setup Inference
+Total Loss = λ₁·L_seg + λ₂·L_depth + λ₃·L_det
 
-The `checkpoints/` directory contains pretrained weights for the HydraNet model, trained for:
-- Semantic Segmentation
-- Monocular Depth Estimation
-
-The `data/` directory includes an example video, broken down into individual `.png` image frames.  
-This sample is provided **only for inference** (example output), to visualize the model's output on a small video snippet segregated in screenshots.  
-**It is not training data.**
-
-> ⚠️ **Note:** The full training dataset is not included in this repository.  
-> It can either be downloaded manually using instructions in the [Appendix](#appendix) at the bottom of this page,  
-> or we can set up a Google Drive folder with the training data.
-
-If you want to test the model on your own video:
-- Extract the frames as `.png` images
-- Replace the contents of the `data/` folder with your own frames
-- Ensure all images are in `.png` format and have consistent resolution
-
-You can run the inference script with the existing data as of now to generate the output using the following command in the IDE terminal.
-
-```bash
-python scripts/inference.py
+Where:
+- L_seg: Cross Entropy (ignore_index=255)
+- L_depth: BerHu loss for robust depth regression
+- L_det: CIoU+DFL+BCE (YOLO) or MultiBox (SSD)
+- λᵢ: Learned uncertainty weights
 ```
 
-Once the script is executed, an output video will be generated showing:
+### Training Strategy
+1. **Stage 1**: Load pretrained seg+depth model (Nekrasov et al.)
+2. **Stage 2**: Freeze encoder/seg/depth, train detection head only
+3. **Knowledge Distillation**: Use teacher models for pseudo-labels
+4. **Mixed Precision**: AMP for faster training and reduced memory
 
-- Original video frames on top  
-- Semantic segmentation in the middle  
-- Depth estimation on the bottom
+## Results
 
-The video will be saved at: `outputs/videos/out.mp4`
+- **YOLOv8 variant** maintains 99% detection accuracy while preserving 87.6% segmentation performance
+- **SSD variant** offers 35% lower GPU memory usage with acceptable accuracy trade-off
+- Both achieve real-time inference (>30 FPS) on NVIDIA Jetson platforms
+- Qualitative results show good alignment between detected objects and segmented regions
 
-You can open this file using any media player of your choice (e.g., VLC, MPV, or your system’s default player).
+## Citation
 
+```bibtex
+@article{hydranet2025,
+  title={Multi-Task Perception Model for Autonomous Vehicles},
+  author={Rohan, Ritwik and Lê, Minh and Lu, Yi and Yong, Yuhan},
+  journal={EN.601.661 Computer Vision},
+  year={2025}
+}
+```
 
+## Contact
 
-## Project Structure 
-
-Please use the directory and file structure/naming convention as shown below to maintain consistency throughout the project.
-
-> 📝 **Note:** Some directories may not be visible on GitHub if they are empty. Git does not track empty folders by default.  
-> However, you should still use and maintain this structure for consistency and future development.
-
-- `cv-multitask-learning-project/`
-  - `multitask_project/` – Core model code and task heads
-    - `encoder.py` – MobileNetV2 encoder
-    - `decoder.py` – Lightweight RefineNet decoder
-    - `multitask_model.py` – Main model integrating encoder, decoder, and heads
-    - `utils.py` – Utility functions for preprocessing and visualization
-    - `__init__.py`
-    - `heads/` – Task-specific prediction heads
-      - `ssd_head.py` – SSD detection head
-      - `yolov8_head.py` – YOLOv8 detection head
-      - `detection_utils.py` – Shared helper functions for detection (e.g., NMS, anchors)
-      - `__init__.py`
-  - `scripts/` – Inference and training entry points
-    - `inference.py` – Run segmentation + depth inference on images
-    - `evaluate.py` – Evaluation logic (to be implemented)
-    - `train_multitask.py` – Train segmentation + depth [+ normals]
-    - `train_seg_depth.py` – Train segmentation + depth only
-    - `train_detection.py` – Train SSD or YOLOv8 detection heads
-  - `checkpoints/` – Pretrained model weights for inference (e.g., `ExpKITTI_joint.ckpt`)
-  - `data/` – Sample inference data (video frames and color map `cmap_kitti.npy`)
-  - `kitti_rawdata/` – Training Data (Local System)
-  - `outputs/` – Generated outputs
-    - `logs/` – Training logs, TensorBoard runs
-    - `predictions/` – Optional saved outputs
-    - `videos/` – Final output videos
-      - `out.mp4` – Stacked result video
-  - `notebooks/` – Jupyter notebooks for quick experiments
-  - `requirements.txt` – Python dependencies
-  - `README.md` – Project documentation (this file)
-
-
-
-> **Note on Scripts and Files:**  
-> Most of the scripts and modules are placeholders as of now and will be implemented in the coming weeks.  
-> Some of them might not end up being used, but I have created in advance to keep the project structure clean, modular, and easy to expand as needed.
----
+**Ritwik Rohan**  
+Robotics Engineer | Johns Hopkins MSE '25  
+Email: ritwikrohan7@gmail.com  
+LinkedIn: [linkedin.com/in/ritwik-rohan](https://linkedin.com/in/ritwik-rohan)
 
 ---
-
-## Appendix
-
-### Downloading Full Training Data
-
-I’m still deciding on the most elegant way to manage and share the full training dataset,  
-but for now, the workflow is planned as follows:
-
-1. **Create a directory named `kitti_rawdata/`** inside the `cv-multitask-learning-project/` root folder.
-
-> This folder is already included in `.gitignore`, so it will **not be pushed to GitHub**.
-
-2. **Download the zip file** containing the data downloader script ([zip file for downloader script](https://drive.google.com/file/d/1I2vAyBpTQCSCvkpjU8uytluSOLWZ4Rh3/view?usp=drive_link)).
-
-3. **Extract the zip inside the `kitti_rawdata/` folder.**
-
-4. **Run the download script** from your terminal:
-
-```bash
-cd cv-multitask-learning-project/kitti_rawdata
-./raw_data_downloader.sh
-```
-
-This will begin downloading the full KITTI raw dataset into the `kitti_rawdata/` folder.
-
-> ⏳ **Note:** Downloading might take **2–3 hours or more** (not sure — I left it overnight).  
-> Please start this process **as soon as possible** so the data is ready for all of us when needed.  
-> I'm also **not entirely sure if this exact raw dataset will be used for training**   
-> we might later switch to some other preprocessed format or subset.  
-> But we need to start somewhere, and this is a good starting point for now.
-
-
-## For Midpoint Check-In
-
-For the midpoint check-in, I was planning to demonstrate the following:
-
-- We have successfully implemented **semantic segmentation** and **depth estimation** tasks using the HydraNet-based architecture.
-- We can include a result snapshot(like below) and **result table** showing performance metrics (e.g., mIoU for segmentation, RMSE for depth) on the example inference dataset.
-
-![alt text](<Screenshot from 2025-03-31 04-14-37.png>)
-
-
-### In Progress
-- We are currently working on integrating **object detection heads** using:
-  - SSD (Single Shot MultiBox Detector)
-  - YOLOv8
-
-We will explore and finalize the evaluation format for these detection tasks soon possibly using mAP (mean Average Precision), precision/recall etc.
-
-### Future Work
-
-- In future work we can write that we can use pointpillar to use lidar data for object detection.
-- We can extend the model to Cityscape or other datasets.
